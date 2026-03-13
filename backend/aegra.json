@@ -1,0 +1,9 @@
+{
+  "name": "backend",
+  "dependencies": [
+    "./src"
+  ],
+  "graphs": {
+    "backend": "./src/backend/graph.py:graph"
+  }
+}
