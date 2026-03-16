@@ -5,5 +5,8 @@
   ],
   "graphs": {
     "backend": "./src/backend/graph.py:graph"
+  },
+  "http": {
+    "app": "./src/custom_routes.py:app"
   }
 }
