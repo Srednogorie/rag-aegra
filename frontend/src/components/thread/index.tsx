@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -22,6 +22,8 @@ import {
   SquarePen,
   XIcon,
   Plus,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -45,6 +47,120 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+
+
+
+// --- Custom RAG file panel ---
+interface UploadedFile {
+  name: string;
+}
+
+function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
+  const [uploading, setUploading] = useState(false);
+
+  const handleChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("http://localhost:2026/custom/uploadfile", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) throw new Error(await res.text());
+        onUploaded();
+      } catch (err: any) {
+        toast.error("Upload failed", {
+          description: err?.message,
+          richColors: true,
+        });
+      } finally {
+        setUploading(false);
+        e.target.value = "";
+      }
+    },
+    [onUploaded],
+  );
+
+  return (
+    <div>
+      <Label
+        htmlFor="custom-file-input"
+        className={cn(
+          "flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50",
+          uploading && "pointer-events-none opacity-50",
+        )}
+      >
+        <Upload className="size-4" />
+        {uploading ? "Uploading…" : "Upload file"}
+      </Label>
+      <input
+        id="custom-file-input"
+        type="file"
+        onChange={handleChange}
+        className="hidden"
+        disabled={uploading}
+      />
+    </div>
+  );
+}
+
+function UploadedFilesList({
+  files,
+  onDeleted,
+}: {
+  files: UploadedFile[];
+  onDeleted: () => void;
+}) {
+  const handleDelete = useCallback(
+    async (filename: string) => {
+      try {
+        const res = await fetch(
+          `http://localhost:2026/custom/file/${encodeURIComponent(filename)}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) throw new Error(await res.text());
+        onDeleted();
+      } catch (err: any) {
+        toast.error("Delete failed", {
+          description: err?.message,
+          richColors: true,
+        });
+      }
+    },
+    [onDeleted],
+  );
+
+  if (files.length === 0) {
+    return (
+      <p className="text-xs italic text-gray-400">No files uploaded yet.</p>
+    );
+  }
+
+  return (
+    <ul className="flex flex-col gap-1">
+      {files.map((f) => (
+        <li
+          key={f.name}
+          className="flex items-center justify-between rounded-md bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm"
+        >
+          <span className="truncate">{f.name}</span>
+          <button
+            onClick={() => handleDelete(f.name)}
+            className="ml-2 shrink-0 text-gray-400 transition-colors hover:text-red-500"
+            title={`Delete ${f.name}`}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -254,6 +370,25 @@ export function Thread() {
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
+  const [customFiles, setCustomFiles] = useState<UploadedFile[]>([]);
+
+  const fetchCustomFiles = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:2026/custom/files");
+      if (!res.ok) throw new Error(await res.text());
+      const data: { files: string[] } = await res.json();
+      setCustomFiles(data.files.map((name) => ({ name })));
+    } catch (err: any) {
+      toast.error("Failed to load files", {
+        description: err?.message,
+        richColors: true,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCustomFiles();
+  }, [fetchCustomFiles]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -309,7 +444,7 @@ export function Thread() {
           }
         >
           {!chatStarted && (
-            <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
+            <div className="relative top-0 left-0 w-full flex items-center justify-between gap-3 p-2 pl-4 z-10 h-12">
               <div>
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
@@ -384,8 +519,6 @@ export function Thread() {
                   <SquarePen className="size-5" />
                 </TooltipIconButton>
               </div>
-
-              <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-linear-to-b" />
             </div>
           )}
           <div className="flex gap-4 h-full overflow-hidden flex-1">
@@ -544,77 +677,17 @@ export function Thread() {
                 }
               />
             </StickToBottom>
-            <div className="basis-1/4 overflow-auto  bg-gray-50">
-              {/*<div className="p-4">
-                <label className="text-sm font-medium mb-2 block">Groq Token</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    id="token"
-                    className="border border-gray-300 rounded-md p-2 w-full bg-white"
-                    placeholder="Provide your Groq token"
-                    onChange={(e) => setGroqToken(e.target.value)}
-                    value={groqToken || ""}
-                  />
-                </div>
+            <div className="basis-1/4 overflow-auto  bg-gray-50 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-gray-700">
+                RAG Files
+              </h3>
+              <CustomFileUpload onUploaded={fetchCustomFiles} />
+              <div className="mt-4">
+                <UploadedFilesList
+                  files={customFiles}
+                  onDeleted={fetchCustomFiles}
+                />
               </div>
-              <div className="p-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Select the main model</label>
-                    <Select value={mainSelectedModel || ""} onValueChange={setMainSelectedModel}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose an option..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="openai/gpt-oss-120b">GPT OSS 120B</SelectItem>
-                        <SelectItem value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</SelectItem>
-                        <SelectItem value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick</SelectItem>
-                        <SelectItem value="moonshotai/kimi-k2-instruct-0905">Kimi K2 Instruct</SelectItem>
-                        <SelectItem value="qwen/qwen3-32b">Qwen 3 32B</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-              <div className="p-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Select the SQL model</label>
-                    <Select value={sqlSelectedModel || ""} onValueChange={setSqlSelectedModel}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose an option..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="openai/gpt-oss-120b">GPT OSS 120B</SelectItem>
-                        <SelectItem value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</SelectItem>
-                        <SelectItem value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick</SelectItem>
-                        <SelectItem value="moonshotai/kimi-k2-instruct-0905">Kimi K2 Instruct</SelectItem>
-                        <SelectItem value="qwen/qwen3-32b">Qwen 3 32B</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-              <div className="p-4">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Select the analysis model</label>
-                    <Select value={analystSelectedModel || ""} onValueChange={setAnalystSelectedModel}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose an option..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="openai/gpt-oss-120b">GPT OSS 120B</SelectItem>
-                        <SelectItem value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</SelectItem>
-                        <SelectItem value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick</SelectItem>
-                        <SelectItem value="moonshotai/kimi-k2-instruct-0905">Kimi K2 Instruct</SelectItem>
-                        <SelectItem value="qwen/qwen3-32b">Qwen 3 32B</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>*/}
             </div>
           </div>
         </motion.div>
