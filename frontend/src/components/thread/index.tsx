@@ -55,38 +55,97 @@ interface UploadedFile {
   name: string;
 }
 
-function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
-  const [uploading, setUploading] = useState(false);
+const CATEGORIES = [
+  { value: "catalog", label: "Documents" },
+  { value: "faq",     label: "FAQ"       },
+  { value: "troubleshooting", label: "Troubleshooting"},
+  { value: "other",     label: "Other"     },
+];
 
-  const handleChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      setUploading(true);
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetch("http://localhost:2026/custom/uploadfile", {
-          method: "POST",
-          body: formData,
-        });
-        if (!res.ok) throw new Error(await res.text());
-        onUploaded();
-      } catch (err: any) {
-        toast.error("Upload failed", {
-          description: err?.message,
-          richColors: true,
-        });
-      } finally {
-        setUploading(false);
-        e.target.value = "";
+type UploadStep = "idle" | "saving" | "processing" | "done" | "error";
+
+function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [category, setCategory]         = useState("other");
+  const [step, setStep]                 = useState<UploadStep>("idle");
+  const [progressMsg, setProgressMsg]   = useState("");
+
+  const uploading = step === "saving" || step === "processing";
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedFile(e.target.files?.[0] ?? null);
+    setStep("idle");
+  };
+
+  const handleSubmit = useCallback(async () => {
+    if (!selectedFile) return;
+    setStep("saving");
+    setProgressMsg("Saving file…");
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("category", category);
+
+      const res = await fetch("http://localhost:2026/custom/uploadfile", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = JSON.parse(line.slice(6));
+          if (payload.step === "error") throw new Error(payload.message);
+          setStep(payload.step as UploadStep);
+          setProgressMsg(payload.message);
+          if (payload.step === "done") onUploaded();
+        }
       }
-    },
-    [onUploaded],
-  );
+    } catch (err: any) {
+      setStep("error");
+      setProgressMsg(err?.message ?? "Upload failed");
+      toast.error("Upload failed", { description: err?.message, richColors: true });
+    } finally {
+      setSelectedFile(null);
+      // reset the hidden input so the same file can be re-selected
+      const input = document.getElementById("custom-file-input") as HTMLInputElement | null;
+      if (input) input.value = "";
+      
+      // Remove the progress bar shortly after completion
+      setTimeout(() => setStep("idle"), 1500);
+    }
+  }, [selectedFile, category, onUploaded]);
+
+  // Step label + colour for the progress indicator
+  const stepLabel: Record<UploadStep, string> = {
+    idle:       "",
+    saving:     "Saving…",
+    processing: "Embedding…",
+    done:       "Done ✓",
+    error:      "Failed ✗",
+  };
+  const stepColor: Record<UploadStep, string> = {
+    idle:       "",
+    saving:     "bg-blue-400",
+    processing: "bg-yellow-400",
+    done:       "bg-green-500",
+    error:      "bg-red-500",
+  };
 
   return (
-    <div>
+    <div className="flex flex-col gap-2">
+      {/* File picker */}
       <Label
         htmlFor="custom-file-input"
         className={cn(
@@ -95,26 +154,65 @@ function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
         )}
       >
         <Upload className="size-4" />
-        {uploading ? "Uploading…" : "Upload file"}
+        {selectedFile ? selectedFile.name : "Choose file…"}
       </Label>
       <input
         id="custom-file-input"
         type="file"
-        onChange={handleChange}
+        onChange={handleFileChange}
         className="hidden"
         disabled={uploading}
       />
+
+      {/* Category dropdown — only visible once a file is chosen */}
+      {selectedFile && !uploading && (
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
+      )}
+
+      {/* Submit button */}
+      {selectedFile && !uploading && (
+        <button
+          onClick={handleSubmit}
+          className="flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+        >
+          <Upload className="size-3.5" />
+          Upload
+        </button>
+      )}
+
+      {/* Progress indicator */}
+      {step !== "idle" && (
+        <div className="flex flex-col gap-1">
+          {/* Bar */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                stepColor[step],
+                step === "saving"     && "w-1/3",
+                step === "processing" && "w-2/3",
+                step === "done"       && "w-full",
+                step === "error"      && "w-full",
+              )}
+            />
+          </div>
+          {/* Label */}
+          <p className="text-xs text-gray-500">{progressMsg || stepLabel[step]}</p>
+        </div>
+      )}
     </div>
   );
 }
 
-function UploadedFilesList({
-  files,
-  onDeleted,
-}: {
-  files: UploadedFile[];
-  onDeleted: () => void;
-}) {
+function UploadedFilesList({files, onDeleted}: {files: UploadedFile[]; onDeleted: () => Promise<void>;}) {
   const handleDelete = useCallback(
     async (filename: string) => {
       try {
@@ -123,7 +221,7 @@ function UploadedFilesList({
           { method: "DELETE" },
         );
         if (!res.ok) throw new Error(await res.text());
-        onDeleted();
+        await onDeleted();
       } catch (err: any) {
         toast.error("Delete failed", {
           description: err?.message,
@@ -678,15 +776,10 @@ export function Thread() {
               />
             </StickToBottom>
             <div className="basis-1/4 overflow-auto  bg-gray-50 p-4">
-              <h3 className="mb-3 text-sm font-semibold text-gray-700">
-                RAG Files
-              </h3>
+              <h3 className="mb-3 text-sm font-semibold text-gray-700">RAG Files</h3>
               <CustomFileUpload onUploaded={fetchCustomFiles} />
               <div className="mt-4">
-                <UploadedFilesList
-                  files={customFiles}
-                  onDeleted={fetchCustomFiles}
-                />
+                <UploadedFilesList files={customFiles} onDeleted={fetchCustomFiles}/>
               </div>
             </div>
           </div>
