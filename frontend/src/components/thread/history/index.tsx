@@ -12,20 +12,30 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PanelRightOpen, PanelRightClose } from "lucide-react";
+import { PanelRightOpen, PanelRightClose, Trash2 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
-function ThreadList({
-  threads,
-  onThreadClick,
-}: {
-  threads: Thread[];
-  onThreadClick?: (threadId: string) => void;
-}) {
+
+function ThreadList(
+  { threads, onThreadClick, onThreadDeleted }: {
+    threads: Thread[]; onThreadClick?: (threadId: string) => void;  onThreadDeleted?: () => void
+  }
+) {
   const [threadId, setThreadId] = useQueryState("threadId");
+  const { deleteThread } = useThreads();
+  
+  const handleThreadDelete = async (threadId: string) => {
+    try {
+      await deleteThread(threadId);
+      setThreadId(null);
+      onThreadDeleted?.();
+    } catch (error) {
+      console.error("Error deleting thread:", error);
+    }
+  };
 
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="h-full flex flex-col w-full gap-2 items-start justify-start overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
         let itemText = t.thread_id;
         if (
@@ -39,13 +49,10 @@ function ThreadList({
           itemText = getContentString(firstMessage.content);
         }
         return (
-          <div
-            key={t.thread_id}
-            className="w-full px-1"
-          >
+          <div key={t.thread_id} className="w-full px-1 flex items-center gap-2">
             <Button
               variant="ghost"
-              className="w-[280px] items-start justify-start text-left font-normal"
+              className="text-left items-start justify-start font-normal flex-1 min-w-0"
               onClick={(e) => {
                 e.preventDefault();
                 onThreadClick?.(t.thread_id);
@@ -54,6 +61,17 @@ function ThreadList({
               }}
             >
               <p className="truncate text-ellipsis">{itemText}</p>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-10 w-10 p-0 shrink-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleThreadDelete(t.thread_id);
+              }}
+            >
+              <Trash2 className="size-4" />
             </Button>
           </div>
         );
@@ -64,12 +82,9 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="h-full flex flex-col w-full gap-2 items-start justify-start overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {Array.from({ length: 30 }).map((_, i) => (
-        <Skeleton
-          key={`skeleton-${i}`}
-          className="h-10 w-[280px]"
-        />
+        <Skeleton key={`skeleton-${i}`} className="w-[280px] h-10" />
       ))}
     </div>
   );
@@ -84,6 +99,23 @@ export default function ThreadHistory() {
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
+  
+  const refreshThreads = async () => {
+    setThreadsLoading(true);
+    try {
+      const updatedThreads = await getThreads();
+      setThreads(updatedThreads);
+    } catch (error) {
+      console.error("Error refreshing threads:", error);
+    } finally {
+      setThreadsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    refreshThreads();
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -96,8 +128,8 @@ export default function ThreadHistory() {
 
   return (
     <>
-      <div className="shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] border-slate-300 lg:flex">
-        <div className="flex w-full items-center justify-between px-4 pt-1.5">
+      <div className="hidden lg:flex flex-col border-r  border-slate-300 items-start justify-start gap-6 h-screen w-[300px] shrink-0 shadow-inner-right">
+        <div className="flex items-center justify-between w-full pt-1.5 px-4">
           <Button
             className="hover:bg-gray-100"
             variant="ghost"
@@ -114,9 +146,11 @@ export default function ThreadHistory() {
           </h1>
         </div>
         {threadsLoading ? (
-          <ThreadHistoryLoading />
+          // TODO: Do some experiments with the loader, it seems like it's not working very properly atm
+          <></>
+          // <ThreadHistoryLoading />
         ) : (
-          <ThreadList threads={threads} />
+          <ThreadList threads={threads} onThreadDeleted={refreshThreads} />
         )}
       </div>
       <div className="lg:hidden">
@@ -137,6 +171,7 @@ export default function ThreadHistory() {
             <ThreadList
               threads={threads}
               onThreadClick={() => setChatHistoryOpen((o) => !o)}
+              onThreadDeleted={refreshThreads}
             />
           </SheetContent>
         </Sheet>

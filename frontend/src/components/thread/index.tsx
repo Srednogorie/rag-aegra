@@ -23,6 +23,7 @@ import {
   XIcon,
   Plus,
   Trash2,
+  Info,
   Upload,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -53,20 +54,22 @@ import {
 // --- Custom RAG file panel ---
 interface UploadedFile {
   name: string;
+  category: string;
+  chunk_count: number;
 }
 
 const CATEGORIES = [
-  { value: "catalog", label: "Documents" },
-  { value: "faq",     label: "FAQ"       },
-  { value: "troubleshooting", label: "Troubleshooting"},
-  { value: "other",     label: "Other"     },
+  { value: "catalog", label: "Catalog" },
+  { value: "faq", label: "FAQ" },
+  { value: "troubleshooting", label: "Troubleshooting" },
+  { value: "manuals", label: "Manuals" },
 ];
 
 type UploadStep = "idle" | "saving" | "processing" | "done" | "error";
 
 function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [category, setCategory]         = useState("other");
+  const [category, setCategory]         = useState("manuals");
   const [step, setStep]                 = useState<UploadStep>("idle");
   const [progressMsg, setProgressMsg]   = useState("");
 
@@ -212,14 +215,17 @@ function CustomFileUpload({ onUploaded }: { onUploaded: () => void }) {
   );
 }
 
-function UploadedFilesList({files, onDeleted}: {files: UploadedFile[]; onDeleted: () => Promise<void>;}) {
+function UploadedFilesList({ files, onDeleted }: { files: UploadedFile[]; onDeleted: () => Promise<void>; }) {
+  const [popoverFile, setPopoverFile] = useState<UploadedFile | null>(null);
+  const getCategoryLabel = (value: string) => CATEGORIES.find((c) => c.value === value)?.label ?? value;
   const handleDelete = useCallback(
-    async (filename: string) => {
+    async (filename: string, category: string) => {
       try {
-        const res = await fetch(
-          `http://localhost:2026/custom/file/${encodeURIComponent(filename)}`,
-          { method: "DELETE" },
-        );
+        const res = await fetch("http://localhost:2026/custom/file", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, category }),
+        });
         if (!res.ok) throw new Error(await res.text());
         await onDeleted();
       } catch (err: any) {
@@ -243,16 +249,38 @@ function UploadedFilesList({files, onDeleted}: {files: UploadedFile[]; onDeleted
       {files.map((f) => (
         <li
           key={f.name}
-          className="flex items-center justify-between rounded-md bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm"
+          className="relative flex items-center justify-between rounded-md bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm"
         >
           <span className="truncate">{f.name}</span>
-          <button
-            onClick={() => handleDelete(f.name)}
-            className="ml-2 shrink-0 text-gray-400 transition-colors hover:text-red-500"
-            title={`Delete ${f.name}`}
-          >
-            <Trash2 className="size-4" />
-          </button>
+          <div className="ml-2 flex shrink-0 items-center gap-1">
+            {/* Info button */}
+            <button
+              onClick={() => setPopoverFile(popoverFile?.name === f.name ? null : f)}
+              className="text-gray-400 transition-colors hover:text-blue-500"
+              title="File info"
+            >
+              <Info className="size-4" />
+            </button>
+            {/* Delete button */}
+            <button
+              onClick={() => handleDelete(f.name, f.category)}
+              className="text-gray-400 transition-colors hover:text-red-500"
+              title={`Delete ${f.name}`}
+            >
+              <Trash2 className="size-4" />
+            </button>
+            {/* Popover */}
+            {popoverFile?.name === f.name && (
+              <div
+                className="absolute right-0 top-full z-50 mt-1 w-80 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+                onMouseLeave={() => setPopoverFile(null)}
+              >
+                <p className="mb-1 font-medium text-gray-800 break-all">{f.name}</p>
+                <p className="text-xs text-gray-500">Category: <span className="text-gray-700">{getCategoryLabel(f.category)}</span></p>
+                <p className="text-xs text-gray-500">Chunks: <span className="text-gray-700">{f.chunk_count}</span></p>
+              </div>
+            )}
+          </div>
         </li>
       ))}
     </ul>
@@ -432,7 +460,7 @@ export function Thread() {
       { messages: [...toolMessages, newHumanMessage], context },
       {
         streamMode: ["values"],
-        streamSubgraphs: true,
+        streamSubgraphs: false,
         streamResumable: true,
         optimisticValues: (prev) => ({
           ...prev,
@@ -450,9 +478,7 @@ export function Thread() {
     setContentBlocks([]);
   };
 
-  const handleRegenerate = (
-    parentCheckpoint: Checkpoint | null | undefined,
-  ) => {
+  const handleRegenerate = (parentCheckpoint: Checkpoint | null | undefined) => {
     // Do this so the loading state is correct
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
@@ -474,8 +500,8 @@ export function Thread() {
     try {
       const res = await fetch("http://localhost:2026/custom/files");
       if (!res.ok) throw new Error(await res.text());
-      const data: { files: string[] } = await res.json();
-      setCustomFiles(data.files.map((name) => ({ name })));
+      const data: { files: { name: string; category: string; chunk_count: number }[] } = await res.json();
+      setCustomFiles(data.files.map((f) => ({ name: f.name, category: f.category, chunk_count: f.chunk_count })));
     } catch (err: any) {
       toast.error("Failed to load files", {
         description: err?.message,

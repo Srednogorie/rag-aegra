@@ -4,7 +4,7 @@
     "./src"
   ],
   "graphs": {
-    "backend": "./src/backend/graph.py:graph"
+    "backend": "./src/backend/graph.py:main_graph"
   },
   "http": {
     "app": "./src/custom_routes.py:app"

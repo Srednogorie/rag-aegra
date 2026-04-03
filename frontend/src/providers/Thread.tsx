@@ -19,6 +19,7 @@ interface ThreadContextType {
   setThreads: Dispatch<SetStateAction<Thread[]>>;
   threadsLoading: boolean;
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
+  deleteThread: (threadId: string) => Promise<void>;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -40,9 +41,12 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const envAuthScheme: string | undefined = process.env.NEXT_PUBLIC_AUTH_SCHEME;
 
   const [apiUrl] = useQueryState("apiUrl", {
-    defaultValue: envApiUrl || "",
+    defaultValue: envApiUrl || "http://localhost:2026",
   });
-  const [assistantId] = useQueryState("assistantId");
+  console.log("apiUrl", apiUrl)
+  const [assistantId] = useQueryState("assistantId", {
+    defaultValue: envAssistantId || "backend",
+  });
   const [authScheme] = useQueryState("authScheme", {
     defaultValue: envAuthScheme || "",
   });
@@ -67,6 +71,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
     return threads;
   }, [apiUrl, assistantId, authScheme, envAssistantId]);
+  
+  const deleteThread = useCallback(async (threadId: string) => {
+    if (!apiUrl || !assistantId) return;
+    const client = createClient(apiUrl, getApiKey() ?? undefined);
+
+    await client.threads.delete(threadId);
+  }, [apiUrl, assistantId]);
 
   const value = {
     getThreads,
@@ -74,6 +85,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreads,
     threadsLoading,
     setThreadsLoading,
+    deleteThread,
   };
 
   return (

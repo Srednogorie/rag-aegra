@@ -22,9 +22,22 @@ db_config = {
 catalog_store = PGVectorStore.from_params(**db_config, table_name="techmart_catalog")
 faq_store = PGVectorStore.from_params(**db_config, table_name="techmart_faq")
 troubleshooting_store = PGVectorStore.from_params(**db_config, table_name="techmart_troubleshooting")
-other_store = PGVectorStore.from_params(**db_config, table_name="techmart_other")
+manuals_store = PGVectorStore.from_params(**db_config, table_name="techmart_manuals")
 
 catalog_index = VectorStoreIndex.from_vector_store(vector_store=catalog_store)
 faq_index = VectorStoreIndex.from_vector_store(vector_store=faq_store)
 troubleshooting_index = VectorStoreIndex.from_vector_store(vector_store=troubleshooting_store)
-other_index = VectorStoreIndex.from_vector_store(vector_store=other_store)
+manuals_index = VectorStoreIndex.from_vector_store(vector_store=manuals_store)
+
+catalog_engine = catalog_index.as_retriever(similarity_top_k=5)
+faq_engine = faq_index.as_retriever(similarity_top_k=5)
+troubleshooting_engine = troubleshooting_index.as_retriever(similarity_top_k=5)
+manuals_engine = manuals_index.as_retriever(similarity_top_k=5)
+
+
+collections = {
+    "catalog": catalog_engine,
+    "faq": faq_engine,
+    "troubleshooting": troubleshooting_engine,
+    "manuals": manuals_engine,
+}
