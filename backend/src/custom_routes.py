@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from llama_cloud import AsyncLlamaCloud, LlamaCloud
+from llama_cloud import AsyncLlamaCloud
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser
 from llama_index.readers.file import PandasCSVReader
@@ -14,7 +14,7 @@ from pydantic import BaseModel  # add to existing imports
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.db_utils import get_db, get_db_cm, get_dbb
+from src.db_utils import get_db_cm
 from src.vector_collections import catalog_index, faq_index, manuals_index, troubleshooting_index
 
 
@@ -85,6 +85,13 @@ async def upload_file(file: UploadFile, category: Annotated[str, Form()] = "docu
                 reader = PandasCSVReader(concat_rows=False, pandas_config={"header": None})
                 docs = reader.load_data(io.BytesIO(file_bytes))
             elif file_mime == "application/pdf":
+                # Parsing PDF documents is straightforward but spitting the result into document chunks can be
+                # challenging. I experimented with all 3 parsing approaches - "text", "markdown" and "items" - see the
+                # expand property of the parse method for more details.
+                # The "text" mode is the easiest to use but then, unless we use more advanced spitter like
+                # SemanticSplitterNodeParser, spitting only by chunk size won't be very effective and precise.
+                # The "items" mode produces structured output which can be processed to create more meaningful chunks.
+                # Ultimately, it all depends on our documents structure and the complexity of the content.
                 client = AsyncLlamaCloud()
                 # Upload and parse a document
                 file_obj = await client.files.create(file=io.BytesIO(file_bytes), purpose="parse")
@@ -118,9 +125,8 @@ async def upload_file(file: UploadFile, category: Annotated[str, Form()] = "docu
                         "target_pages": "5,6",
                     },
                     # Parsed content to include in the returned response
-                    expand=["items"],
+                    expand=["text"],
                 )
-                breakpoint()
                 markdown_parser = MarkdownNodeParser()
                 for page in result.markdown.pages:
                     docs = markdown_parser.get_nodes_from_documents([Document(text=page.markdown)])
@@ -166,6 +172,8 @@ async def delete_file(body: DeleteFileRequest, db: Annotated[Session, Depends(ge
     )
     return {"status": "deleted"}
 
+
+# The response from the parsing job in items mode - expand=["items"].
 
 # ParsingGetResponse(
 #     job=Job(

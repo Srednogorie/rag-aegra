@@ -1,54 +1,9 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.19.1
-#   kernelspec:
-#     display_name: Python 3 (ipykernel)
-#     language: python
-#     name: python3
-# ---
-
-# %% [markdown]
-# # Agentic Adaptive RAG with LangGraph
-#
-# In this notebook, we'll build the most sophisticated RAG system yet - one that adapts its strategy based on query
-# complexity, evaluates result quality, and can even rewrite queries for better results.
-#
-# ## What is Adaptive RAG?
-#
-# Adaptive RAG goes beyond simple routing by:
-# 1. **Analyzing query complexity** to determine the best retrieval strategy
-# 2. **Searching multiple collections** when queries span domains
-# 3. **Evaluating result quality** and adapting if results are poor
-# 4. **Rewriting queries** to improve retrieval when needed
-# 5. **Self-correcting** through iterative refinement
-#
-# ## Learning Objectives
-#
-# By the end of this notebook, you will:
-# - Understand query complexity analysis and strategy selection
-# - Build multi-collection search capabilities
-# - Implement response quality evaluation and grading
-# - Create query rewriting and expansion mechanisms
-# - Design self-correcting RAG workflows
-# - Compare adaptive RAG with simpler approaches
-
-# %% [markdown]
-# ## Setup and Imports
-#
-# We'll need additional imports for the adaptive functionality.
-
-# %%
 import asyncio
 import os
 import sys
-from traceback import print_list
+sys.path.append("/home/middlefour/Development/oreilly/agentic_rag_with_langgraph")
 
-from llama_index.core.schema import NodeWithScore; sys.path.append("/home/middlefour/Development/oreilly/agentic_rag_with_langgraph")
+from llama_index.core.schema import NodeWithScore
 
 from dotenv import load_dotenv
 # Load environment variables
@@ -68,11 +23,10 @@ print("Tavily API key found!")
 from langchain_community.retrievers import TavilySearchAPIRetriever
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
-from langchain.messages import HumanMessage, AIMessage, SystemMessage
-from langgraph.graph import END, MessagesState, StateGraph
+from langchain.messages import HumanMessage, AIMessage
+from langgraph.graph import END, StateGraph
 
 from src.vector_collections import collections
-# from src.backend.utils import ParallelLogManager
 from src.backend.state import (
     DocumentGrade,
     MainGraphState,
@@ -92,20 +46,6 @@ from src.backend.prompts import (
 
 print("All imports successful!")
 
-# %%
-# We'll use the same domain-separated ChromaDB collections from the router RAG notebook.
-# This separation allows us to route queries to the most appropriate knowledge domains:
-# product catalog, FAQ, and troubleshooting guides.
-
-# %% [markdown]
-# For optimal performance, we use different specialized language models for different tasks:
-# - **Analysis LLM**: Most capable model for complex query analysis and decomposition
-# - **Generation LLM**: Balanced model for answer generation
-# - **Evaluation LLM**: Fast model for document relevance evaluation
-
-# %%
-# Initialize separate language models for different tasks
-# Analysis LLM - Most capable model for complex query analysis and decomposition
 analysis_llm = ChatOpenAI(
     model="gpt-4.1",
     api_key=openai_api_key,
@@ -127,18 +67,12 @@ print(f"Analysis language model initialized: {analysis_llm.model_name}")
 print(f"Generation language model initialized: {generation_llm.model_name}")
 print(f"Evaluation language model initialized: {evaluation_llm.model_name}")
 
-
-# %% [markdown]
-# ## Query Router
-# Now we'll create a query router chain that determines collections for each individual query.
-
 # %%
 # Create routing chain
 routing_chain = routing_prompt | analysis_llm.with_structured_output(QueryRouting)
 print("Query router created!")
 
 
-# %% [markdown]
 # ## Document Grading System
 # After retrieving documents, we need to evaluate their relevance to the query.
 # This grading system helps us filter out irrelevant documents and determine if we need to retry with a rewritten query.
@@ -180,15 +114,12 @@ async def evaluate_documents(query: str, documents: list[Document]) -> list[Docu
 
 print("Document evaluation system created!")
 
-
-# %% [markdown]
 # ## Query Rewriting and Expansion
 # When initial results are poor, we can rewrite the query to improve retrieval.
 # Create rewriting chain with analysis LLM
 rewrite_chain = rewrite_prompt | analysis_llm.with_structured_output(QueryRewrite)
 print("Enhanced query rewriting system created using gpt-4.1!")
 
-# %% [markdown]
 # ## Answer Generation for Subqueries
 # Each subquery processed through our subgraph needs to generate a focused answer based on the relevant documents found.
 # This answer will later be combined with other subquery results to form the final response.
@@ -196,8 +127,6 @@ print("Enhanced query rewriting system created using gpt-4.1!")
 subquery_answer_generation_chain = subquery_answer_generation_prompt | generation_llm
 print("Subquery answer generation chain created!")
 
-
-# %% [markdown]
 # ## Define Subgraph Nodes and Conditional Logic
 #
 # Now we'll define the individual nodes that make up our subgraph workflow.
@@ -212,7 +141,6 @@ print("Subquery answer generation chain created!")
 # The conditional logic determines the flow between nodes,
 # including retry mechanisms when initial retrieval fails to find relevant documents.
 
-# %%
 # define the conditional edges that determine the next node to visit
 def should_retry_with_rewrite(state: ProcessQueryGraphState) -> str:
     """Determine if query should be retried with rewriting or proceed to generation."""
@@ -448,14 +376,12 @@ def rewrite_query(state: ProcessQueryGraphState) -> ProcessQueryGraphState:
 print("Subgraph nodes with fixed retry logic created!")
 
 
-# %% [markdown]
 # ## Building the Subgraph
 #
 # The subgraph handles the complete life cycle of processing a single query, starting with query rewriting/enhancement,
 # then routing → retrieval → evaluation → generation.
 # It includes self-correction mechanisms to retry with rewritten queries when initial retrieval fails.
 
-# %%
 # Define routing function for conditional edges
 def route_to_retrieval_source(state: ProcessQueryGraphState) -> str:
     """Determine which retrieve node to call based on router decision."""
@@ -513,12 +439,10 @@ subgraph_builder.add_edge("generate_subquery_answer", END)
 process_query_subgraph = subgraph_builder.compile()
 print("Query processing subgraph with self-correction mechanism created and compiled!")
 
-# %%
 # visualize the subgraph
 # display(Image(process_query_subgraph.get_graph().draw_mermaid_png()))
 
 
-# %% [markdown]
 # ## Query Analysis and Decomposition
 #
 # The first step in our adaptive RAG system is analyzing the query to determine the optimal processing strategy.
@@ -542,37 +466,6 @@ print("Query processing subgraph with self-correction mechanism created and comp
 query_analysis_chain = query_analysis_prompt | analysis_llm.with_structured_output(QueryAnalysis)
 
 print("Query analysis system created using gpt-4.1!")
-
-# %% [markdown]
-# ## Test Query Analysis
-# Let's test our query analyzer with different types of queries.
-
-# %%
-# Test queries of varying complexity including decomposition examples
-# test_queries = [
-#     "What are the specs of the UltraBook Pro 14?",  # no decomposition
-#     "What gaming laptops do you have and what are your return policies?",  # parallel decomposition
-#     "battery life for zenithbook air 15 vs ultrabook 14 pro",  # parallel decomposition
-#     "I need a laptop and want to know about Chrome crashes on macOS",  # parallel decomposition
-# ]
-
-# print("Testing Query Decomposition Analysis:")
-# print("=" * 90)
-
-# for query in test_queries:
-#     analysis = query_analysis_chain.invoke({"query": query})
-#     print(f"\nQuery: {query}")
-#     print(f"Needs Decomposition: {analysis.needs_decomposition}")
-#     if analysis.needs_decomposition:
-#         print(f"Sub-queries: {analysis.sub_queries}")
-#         print(f"Execution Plan: {analysis.execution_plan}")
-#     print(f"Reasoning: {analysis.reasoning}")
-#     print("-" * 80)
-
-
-# %%
-# Global log manager for parallel execution
-# log_manager = ParallelLogManager()
 
 
 # define a helper function to process a single query using the subgraph
@@ -607,8 +500,6 @@ async def _process_single_query(query: str, needs_rewrite: bool = False, previou
         "subquery_answer": result.get("subquery_answer", ""),
     }
 
-
-# %% [markdown]
 # ## Main Graph Nodes
 # The main graph consists of three primary nodes that orchestrate the entire adaptive RAG workflow: query analysis,
 # query processing, and final answer generation.
@@ -616,14 +507,11 @@ def get_last_human_message(messages):
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return msg.content
-# %%
+
 # 3-node main graph
 def query_analysis(state: MainGraphState) -> MainGraphState:
     """Decompose query and determine execution plan."""
     query = get_last_human_message(state["messages"])
-
-    # Clear previous logs
-    # log_manager.clear()
 
     # Analyze the query for decomposition only
     analysis = query_analysis_chain.invoke({"query": query})
@@ -662,9 +550,6 @@ async def process_queries(state: MainGraphState) -> MainGraphState:
             query_results[result["query"]] = result["documents"]
             all_docs.extend(result["documents"])
 
-            # Print organized logs for single query
-            # log_manager.print_all_logs("Single Query Processing")
-
         elif execution_plan == "parallel":
             # Parallel execution - no rewriting needed for any query
             print(f"\nExecuting {len(sub_queries)} queries in parallel")
@@ -680,8 +565,6 @@ async def process_queries(state: MainGraphState) -> MainGraphState:
                 query_results[result["query"]] = result["documents"]
                 all_docs.extend(result["documents"])
 
-            # Print organized logs for parallel execution
-            # log_manager.print_all_logs("Parallel Query Processing")
 
         else:  # sequential
             # Sequential execution with context accumulation
@@ -706,11 +589,6 @@ async def process_queries(state: MainGraphState) -> MainGraphState:
                 # Accumulate context for next query
                 accumulated_context += f"Step {i} result: {result['subquery_answer']}\n"
 
-                # Print logs for this step immediately
-                # if query in log_manager.loggers:
-                #     print(f"\nStep {i} Processing Details:")
-                #     log_manager.loggers[query].print_logs("  ")
-
     print(f"\n{'=' * 80}")
     print("Query Processing Summary:")
     print(f"  Total queries processed: {len(sub_queries)}")
@@ -724,7 +602,6 @@ async def process_queries(state: MainGraphState) -> MainGraphState:
     }
 
 
-# %%
 def generate(state: MainGraphState) -> MainGraphState:
     """Generate final answer using combined results from all queries."""
     original_query = state["original_query"]
@@ -779,12 +656,11 @@ def generate(state: MainGraphState) -> MainGraphState:
 
 print("Main graph nodes created!")
 
-# %% [markdown]
+
 # ## Build the Main Graph
 #
 # Now we'll create the main graph that uses subgraphs and the Send API for improved query processing.
 
-# %%
 # Create the 3-node main graph
 
 # Build the main graph
@@ -805,132 +681,3 @@ graph_builder.add_edge("generate", END)
 
 # Compile the graph
 main_graph = graph_builder.compile()
-
-# Very simple graph
-# llm = ChatOpenAI(model="gpt-4o-mini")
-
-
-# def simple_answer(state: MessagesState) -> MessagesState:
-#     return {"messages": [llm.invoke(state["messages"])]}
-
-
-# class State(MessagesState):
-#     pass
-
-
-# graph_builder = StateGraph(State)
-
-# graph_builder.add_node("simple_answer", simple_answer)
-# graph_builder.set_entry_point("simple_answer")
-# graph_builder.set_finish_point("simple_answer")
-
-# main_graph = graph_builder.compile()
-
-
-
-# print("3-node Adaptive RAG graph compiled successfully!")
-
-# %% [markdown]
-# ## Visualize the Main Graph
-# Let's visualize our clean 3-node architecture.
-
-# %%
-# print("Main Graph (3-node architecture):")
-# display(Image(main_graph.get_graph().draw_mermaid_png()))
-
-
-# %%
-# async def ask_adaptive_rag(query: str):
-#     """Ask a question to our Adaptive RAG system with organized logging."""
-#     print(f"\n{'=' * 100}")
-#     print(f"ADAPTIVE RAG QUERY: {query}")
-#     print(f"{'=' * 100}")
-
-#     # Run the adaptive RAG workflow
-#     result = await main_graph.ainvoke({"query": query})
-
-#     print(f"\n{'=' * 100}")
-#     print("FINAL ANSWER:")
-#     print(f"{'=' * 100}")
-#     print(f"{result['answer']}")
-#     print(f"{'=' * 100}")
-#     print("Query  processing completed successfully!")
-#     print(f"{'=' * 100}")
-
-
-# %% [markdown]
-# ## Testing the Adaptive RAG System
-# Let's test our adaptive RAG system with various query types to demonstrate its capabilities: parallel decomposition,
-# sequential processing, web search integration, and product comparisons.
-
-# %%
-# Test with parallel decomposition query
-# await ask_adaptive_rag("What laptops do you have with Intel i7 processors and what are your return policies?")
-
-# %%
-# Test with sequential decomposition query - now with context-aware enhancement
-# await ask_adaptive_rag("Find me the best mouse you have then check if it has any issues")
-
-# %%
-# Test with web search query
-# await ask_adaptive_rag("Windows 11 blue screen error 0x0000007E - how do I fix this?")
-
-# %%
-# Test a query that compares two products
-# await ask_adaptive_rag("battery life for zenithbook 11 vs ultrapook 14 pro")
-
-# %% [markdown]
-# ## Interactive Testing
-#
-# Try your own complex queries to see how the adaptive system handles them.
-# The system will automatically analyze whether decomposition is needed and execute the appropriate strategy.
-
-# %%
-# Try your own query here!
-# your_question = ""
-# await ask_adaptive_rag(your_question)
-
-# %% [markdown]
-# ## Comparison: Adaptive RAG vs Router RAG
-#
-# Let's compare how Adaptive RAG improves upon Router RAG:
-#
-# ### Adaptive RAG Advantages:
-#
-# 1. **Query Decomposition**: Automatically breaks complex multi-part questions into manageable sub-queries
-# 2. **Context-Aware Sequential Processing**: Later sub-queries are enhanced with results from earlier ones
-# 3. **Self-Correction**: Automatically rewrites queries when no relevant documents are found
-# 4. **Quality Evaluation**: Documents are graded for relevance before answer generation
-# 5. **Execution Optimization**: Parallel execution for independent sub-queries, sequential for dependent ones
-# 6. **Multi-Collection Search**: Single queries can search across multiple domains simultaneously
-#
-# ### When Adaptive RAG Excels:
-#
-# - **Multi-Part Questions**: "What laptops do you have and what are your return policies?"
-# - **Sequential Dependencies**: "Find the best mouse, then check if it has issues" →
-# Enhanced second query with specific product
-# - **Comparison Queries**: "Battery life for ZenithBook vs UltraBook" → Parallel sub-queries for each product
-# - **Vague Queries**: "Fast thing" → Automatic rewriting to "high performance laptop with fast processor"
-# - **Mixed Domain Queries**: Product questions + technical troubleshooting in one query
-#
-# ### Remaining Challenges:
-#
-# - **Increased Complexity**: More components and potential failure points
-# - **Higher Latency**: Multiple sub-query processing takes longer than single routing
-# - **API Cost**: More LLM calls for decomposition, evaluation, and potential rewrites
-# - **Decomposition Accuracy**: Incorrect query splitting can lead to suboptimal results
-#
-# ### Architecture Highlights:
-#
-# - **Subgraph Design**: Each sub-query gets full routing → retrieval → evaluation → generation treatment
-# - **State Management**: Clean flag-based retry logic prevents infinite loops
-# - **Context Propagation**: Sequential queries build upon previous findings for targeted retrieval
-#
-# This represents the most sophisticated RAG system, ideal for complex applications requiring high-quality answers
-# over speed optimization.
-
-# %%
-
-
-# if __name__ == "__main__":
-#     asyncio.run(main())
